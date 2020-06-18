@@ -10,8 +10,6 @@ import traceback
 from datetime import datetime
 from tqdm import tqdm
 
-from numpy import ndarray
-
 
 class FaceswapLogger(logging.Logger):
     """ Create custom logger  with custom levels """
@@ -40,35 +38,41 @@ class FaceswapLogger(logging.Logger):
 
 
 class FaceswapFormatter(logging.Formatter):
-    """ Override formatter to strip newlines from logger arguments """
+    """ Override formatter to strip newlines the final message """
+
     def format(self, record):
-        if isinstance(record.msg, str) and ("\n" in record.msg or "\r" in record.msg):
-            record.msg = record.msg.replace("\n", "\\n").replace("\r", "\\r")
-        if any(self.reformat_check(arg) for arg in record.args):
-            record.args = self.reformat_args(record.args)
-        return super().format(record)
+        record.message = record.getMessage()
+        record = self.rewrite_tf_deprecation(record)
+        # strip newlines
+        if "\n" in record.message or "\r" in record.message:
+            record.message = record.message.replace("\n", "\\n").replace("\r", "\\r")
+
+        if self.usesTime():
+            record.asctime = self.formatTime(record, self.datefmt)
+        msg = self.formatMessage(record)
+        if record.exc_info:
+            # Cache the traceback text to avoid converting it multiple times
+            # (it's constant anyway)
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            if msg[-1:] != "\n":
+                msg = msg + "\n"
+            msg = msg + record.exc_text
+        if record.stack_info:
+            if msg[-1:] != "\n":
+                msg = msg + "\n"
+            msg = msg + self.formatStack(record.stack_info)
+        return msg
 
     @staticmethod
-    def reformat_check(arg):
-        """ Check if the argument should be reformatted
-            The argument is a string with a line break
-            The argument is a numpy array
-        """
-        return ((isinstance(arg, str) and ("\n" in arg or "\r" in arg))
-                or isinstance(arg, ndarray))
-
-    @staticmethod
-    def reformat_args(args):
-        """ Reformat args that require new lines removing """
-        new_args = []
-        for arg in args:
-            if isinstance(arg, ndarray):
-                # Convert numpy arrays to string for reformatting
-                arg = str(ndarray)
-            if isinstance(arg, str) and ("\n" in arg or "\r" in arg):
-                arg = arg.replace("\n", "\\n").replace("\r", "\\r")
-            new_args.append(arg)
-        return tuple(new_args)
+    def rewrite_tf_deprecation(record):
+        """ Change TF deprecation messages from WARNING to DEBUG """
+        if record.levelno == 30 and (record.funcName == "_tfmw_add_deprecation_warning" or
+                                     record.module in("deprecation", "deprecation_wrapper")):
+            record.levelno = 10
+            record.levelname = "DEBUG"
+        return record
 
 
 class RollingBuffer(collections.deque):
@@ -166,14 +170,18 @@ def get_loglevel(loglevel):
 
 def crash_log():
     """ Write debug_buffer to a crash log on crash """
-    from lib.sysinfo import sysinfo
-    path = os.getcwd()
+    original_traceback = traceback.format_exc()
+    path = os.path.dirname(os.path.realpath(sys.argv[0]))
     filename = os.path.join(path, datetime.now().strftime("crash_report.%Y.%m.%d.%H%M%S%f.log"))
-
     freeze_log = list(debug_buffer)
+    try:
+        from lib.sysinfo import sysinfo  # pylint:disable=import-outside-toplevel
+    except Exception:  # pylint:disable=broad-except
+        sysinfo = ("\n\nThere was an error importing System Information from lib.sysinfo. This is "
+                   "probably a bug which should be fixed:\n{}".format(traceback.format_exc()))
     with open(filename, "w") as outfile:
         outfile.writelines(freeze_log)
-        traceback.print_exc(file=outfile)
+        outfile.write(original_traceback)
         outfile.write(sysinfo)
     return filename
 

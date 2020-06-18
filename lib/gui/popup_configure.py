@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .control_helper import ControlPanel, ControlPanelOption
-from .tooltip import Tooltip
+from .custom_widgets import Tooltip
 from .utils import get_config, get_images
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -32,11 +32,12 @@ class ConfigurePlugins(tk.Toplevel):
     def __init__(self, config, root):
         logger.debug("Initializing %s", self.__class__.__name__)
         super().__init__()
-        name, self.config = config
-        self.title("{} Plugins".format(name.title()))
+        self._name, self.config = config
+        self.title("{} Plugins".format(self._name.title()))
         self.tk.call('wm', 'iconphoto', self._w, get_images().icons["favicon"])
 
-        self.set_geometry(root)
+        self._root = root
+        self.set_geometry()
 
         self.page_frame = ttk.Frame(self)
         self.page_frame.pack(fill=tk.BOTH, expand=True)
@@ -47,11 +48,11 @@ class ConfigurePlugins(tk.Toplevel):
         self.update()
         logger.debug("Initialized %s", self.__class__.__name__)
 
-    def set_geometry(self, root):
+    def set_geometry(self):
         """ Set pop-up geometry """
         scaling_factor = get_config().scaling_factor
-        pos_x = root.winfo_x() + 80
-        pos_y = root.winfo_y() + 80
+        pos_x = self._root.winfo_x() + 80
+        pos_y = self._root.winfo_y() + 80
         width = int(600 * scaling_factor)
         height = int(400 * scaling_factor)
         logger.debug("Pop up Geometry: %sx%s, %s+%s", width, height, pos_x, pos_y)
@@ -105,12 +106,12 @@ class ConfigurePlugins(tk.Toplevel):
         """ Build a plugin config page """
         logger.debug("Building plugin config page: '%s'", category)
         plugins = sorted(list(key for key in self.config_cpanel_dict[category].keys()))
-        panel_kwargs = dict(columns=2, option_columns=2, blank_nones=False)
+        panel_kwargs = dict(columns=2, max_columns=2, option_columns=2, blank_nones=False)
         if any(plugin != category for plugin in plugins):
             page = ttk.Notebook(container)
             page.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
             for plugin in plugins:
-                cp_options = [opt for opt in self.config_cpanel_dict[category][plugin].values()]
+                cp_options = list(self.config_cpanel_dict[category][plugin].values())
                 frame = ControlPanel(page,
                                      cp_options,
                                      header_text=self.plugin_info[plugin],
@@ -119,7 +120,7 @@ class ConfigurePlugins(tk.Toplevel):
                 title = title.replace("_", " ").title()
                 page.add(frame, text=title)
         else:
-            cp_options = [opt for opt in self.config_cpanel_dict[category][plugins[0]].values()]
+            cp_options = list(self.config_cpanel_dict[category][plugins[0]].values())
             page = ControlPanel(container,
                                 cp_options,
                                 header_text=self.plugin_info[plugins[0]],
@@ -187,6 +188,13 @@ class ConfigurePlugins(tk.Toplevel):
                 new_config.set(section, item, str(new_opt))
         self.config.config = new_config
         self.config.save_config()
-        print("Saved config: '{}'".format(self.config.configfile))
+        logger.info("Saved config: '%s'", self.config.configfile)
         self.destroy()
+
+        running_task = get_config().tk_vars["runningtask"].get()
+        if self._name.lower() == "gui" and not running_task:
+            self._root.rebuild()
+        elif self._name.lower() == "gui" and running_task:
+            logger.info("Can't redraw GUI whilst a task is running. GUI Settings will be applied "
+                        "at the next restart.")
         logger.debug("Saved config")

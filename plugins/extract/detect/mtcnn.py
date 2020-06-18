@@ -25,6 +25,7 @@ class Detect(Detector):
         self.vram_per_batch = 32
         self.batchsize = self.config["batch-size"]
         self.kwargs = self.validate_kwargs()
+        self.color_format = "RGB"
 
     def validate_kwargs(self):
         """ Validate that config options are correct. If not reset to default """
@@ -57,7 +58,7 @@ class Detect(Detector):
 
     def process_input(self, batch):
         """ Compile the detection image(s) for prediction """
-        batch["feed"] = (batch["scaled_image"] - 127.5) / 127.5
+        batch["feed"] = (batch["image"] - 127.5) / 127.5
         return batch
 
     def predict(self, batch):
@@ -196,7 +197,7 @@ class MTCNN():
     def __init__(self, model_path, allow_growth, minsize, threshold, factor):
         """
         minsize: minimum faces' size
-        threshold: threshold=[th1, th2, th3], th1-3 are three steps's threshold
+        threshold: threshold=[th1, th2, th3], th1-3 are three steps threshold
         factor: the factor used to create a scaling pyramid of face sizes to
                 detect in the image.
         pnet, rnet, onet: caffemodel
@@ -246,8 +247,7 @@ class MTCNN():
             rwidth, rheight = int(width * scale), int(height * scale)
             batch = np.empty((batch_items, rheight, rwidth, 3), dtype="float32")
             for idx in range(batch_items):
-                batch[idx, ...] = cv2.resize(images[idx, ...],  # pylint:disable=no-member
-                                             (rwidth, rheight))
+                batch[idx, ...] = cv2.resize(images[idx, ...], (rwidth, rheight))
             output = self.pnet.predict(batch)
             cls_prob = output[0][..., 1]
             roi = output[1]
@@ -256,7 +256,7 @@ class MTCNN():
             cls_prob = np.swapaxes(cls_prob, 1, 2)
             roi = np.swapaxes(roi, 1, 3)
             for idx in range(batch_items):
-                # first index 0 = cls score, 1 = one hot repr
+                # first index 0 = class score, 1 = one hot repr
                 rectangle = detect_face_12net(cls_prob[idx, ...],
                                               roi[idx, ...],
                                               out_side,
@@ -280,7 +280,7 @@ class MTCNN():
             predict_24_batch = []
             for rect in rectangles:
                 crop_img = image[int(rect[1]):int(rect[3]), int(rect[0]):int(rect[2])]
-                scale_img = cv2.resize(crop_img, (24, 24))  # pylint:disable=no-member
+                scale_img = cv2.resize(crop_img, (24, 24))
                 predict_24_batch.append(scale_img)
                 crop_number += 1
             predict_24_batch = np.array(predict_24_batch)
@@ -307,7 +307,7 @@ class MTCNN():
             predict_batch = []
             for rect in rectangles:
                 crop_img = image[int(rect[1]):int(rect[3]), int(rect[0]):int(rect[2])]
-                scale_img = cv2.resize(crop_img, (48, 48))  # pylint:disable=no-member
+                scale_img = cv2.resize(crop_img, (48, 48))
                 predict_batch.append(scale_img)
                 crop_number += 1
             predict_batch = np.array(predict_batch)
@@ -492,7 +492,7 @@ def nms(rectangles, threshold, method):
     s_sort = np.array(var_s.argsort())
     pick = []
     while len(s_sort) > 0:
-        # s_sort[-1] have hightest prob score, s_sort[0:-1]->others
+        # s_sort[-1] have highest prob score, s_sort[0:-1]->others
         xx_1 = np.maximum(x_1[s_sort[-1]], x_1[s_sort[0:-1]])
         yy_1 = np.maximum(y_1[s_sort[-1]], y_1[s_sort[0:-1]])
         xx_2 = np.minimum(x_2[s_sort[-1]], x_2[s_sort[0:-1]])
